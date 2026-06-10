@@ -619,6 +619,65 @@ def print_text_report(
     print(f"{'=' * 80}")
 
 
+def auth_label(authenticated):
+    if authenticated is True:
+        return "authenticated"
+    if authenticated is False:
+        return "unauthenticated"
+    return "unknown"
+
+
+def serialize_endpoint(endpoint):
+    auth = endpoint.get("authenticated")
+    return {
+        "id": endpoint.get("id"),
+        "method": endpoint.get("request_method"),
+        "url": endpoint.get("url"),
+        "status_code": endpoint.get("status_code"),
+        "authenticated": auth,
+        "auth": auth_label(auth),
+        "parameters": endpoint.get("request_parameters_count"),
+        "raw_request_size": endpoint.get("raw_request_size"),
+        "raw_response_size": endpoint.get("raw_response_size"),
+        "result": endpoint.get("result"),
+        "reason": endpoint.get("reason") or None,
+    }
+
+
+def serialize_finding(finding):
+    return {
+        "id": finding.get("id"),
+        "name": finding.get("definition", {}).get("name"),
+        "url": finding.get("url"),
+        "severity": normalize_severity(
+            finding.get("severity", "low")
+        ),
+        "state": finding.get("state"),
+        "parameter": finding.get("parameter") or None,
+        "cwe_id": finding.get("definition", {}).get("cwe_id"),
+    }
+
+
+def rejected_reason_counts(rejected):
+    reasons = {}
+    for endpoint in rejected:
+        reason = endpoint.get("reason") or "no reason provided"
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return dict(
+        sorted(reasons.items(), key=lambda item: -item[1])
+    )
+
+
+def scan_profile_value(scan):
+    scan_profile = scan.get("scan_profile")
+    if isinstance(scan_profile, dict):
+        return {
+            "id": scan_profile.get("id"),
+            "name": scan_profile.get("name"),
+        }
+    return scan_profile
+
+
 def print_json_report(
     target,
     scan,
@@ -628,6 +687,10 @@ def print_json_report(
 ):
     ea = endpoint_analysis
     fa = finding_analysis
+    include_dedup = target.get(
+        "include_deduplicated_endpoints", False
+    )
+
     report = {
         "tenant": TENANT,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -642,6 +705,7 @@ def print_json_report(
         "scan": {
             "id": scan.get("id"),
             "status": scan.get("status"),
+            "scan_profile": scan_profile_value(scan),
             "started": scan.get("started"),
             "completed": scan.get("completed"),
             "runtime": scan.get("runtime"),
@@ -665,6 +729,31 @@ def print_json_report(
                 ea["avg_response_size"]
             ),
             "total_parameters": ea["total_parameters"],
+            "avg_parameters": round(ea["avg_parameters"], 1),
+            "non_2xx": [
+                serialize_endpoint(e) for e in ea["non_2xx"]
+            ],
+            "unauthenticated": [
+                serialize_endpoint(e)
+                for e in ea["unauthenticated"]
+            ],
+        },
+        "rejected_endpoints": {
+            "available": include_dedup,
+            "total": len(ea["rejected"]),
+            "by_reason": (
+                rejected_reason_counts(ea["rejected"])
+                if include_dedup
+                else {}
+            ),
+            "items": (
+                [
+                    serialize_endpoint(e)
+                    for e in ea["rejected"]
+                ]
+                if include_dedup
+                else []
+            ),
         },
         "findings": {
             "scope": "open",
@@ -673,6 +762,17 @@ def print_json_report(
             "high": len(fa["high"]),
             "medium": len(fa["medium"]),
             "low": len(fa["low"]),
+            "items": {
+                severity: [
+                    serialize_finding(f) for f in fa[severity]
+                ]
+                for severity in (
+                    "critical",
+                    "high",
+                    "medium",
+                    "low",
+                )
+            },
         },
     }
     if endpoint_details:
