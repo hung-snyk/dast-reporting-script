@@ -147,7 +147,7 @@ def fetch_endpoints(client, target_id, scan_id):
 def fetch_findings(client, target_id, scan_id):
     return client.get_all(
         f"/targets/{target_id}/findings/",
-        params={"scan": scan_id},
+        params={"scan": scan_id, "state": "notfixed"},
     )
 
 
@@ -377,8 +377,14 @@ def print_text_report(
             f"({scan_profile.get('id', '')})"
         )
 
+    target_name = (
+        target.get("site", {}).get("name")
+        or target.get("name")
+        or "—"
+    )
+    print(f"\nTarget name:    {target_name}")
     print(
-        f"\nTarget:         "
+        f"Target:         "
         f"{target.get('site', {}).get('url', '—')}"
     )
     print(f"Target ID:      {target.get('id', '—')}")
@@ -627,6 +633,10 @@ def print_json_report(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "target": {
             "id": target.get("id"),
+            "name": (
+                target.get("site", {}).get("name")
+                or target.get("name")
+            ),
             "url": target.get("site", {}).get("url"),
         },
         "scan": {
@@ -657,6 +667,7 @@ def print_json_report(
             "total_parameters": ea["total_parameters"],
         },
         "findings": {
+            "scope": "open",
             "total": sum(len(v) for v in fa.values()),
             "critical": len(fa["critical"]),
             "high": len(fa["high"]),
