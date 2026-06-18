@@ -28,7 +28,7 @@ from urllib3.util.retry import Retry
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-TENANT = "INSERT_TENANT_NAME_HERE"  # e.g. "mycompany"
+VERSION = "v3.1"
 API_BASE_URL = "https://api.us.probely.com"
 REQUEST_TIMEOUT = 30
 
@@ -147,7 +147,7 @@ def fetch_endpoints(client, target_id, scan_id):
 def fetch_findings(client, target_id, scan_id):
     return client.get_all(
         f"/targets/{target_id}/findings/",
-        params={"scan": scan_id, "state": "notfixed"},
+        params={"scan": scan_id},
     )
 
 
@@ -303,6 +303,29 @@ def print_header(title):
     print(f"{'=' * 80}\n")
 
 
+def print_table(indent, headers, rows):
+    str_rows = [[str(cell) for cell in row] for row in rows]
+    widths = [
+        max(
+            len(headers[i]),
+            *(len(row[i]) for row in str_rows),
+        )
+        for i in range(len(headers))
+    ]
+    prefix = " " * indent
+    sep = prefix + "  ".join("─" * w for w in widths)
+
+    def fmt_row(cells):
+        return prefix + "  ".join(
+            f"{cell:<{widths[i]}}" for i, cell in enumerate(cells)
+        )
+
+    print(fmt_row(headers))
+    print(sep)
+    for row in str_rows:
+        print(fmt_row(row))
+
+
 def print_endpoint_detail(detail):
     ep_id = detail.get("id", "?")
     method = detail.get("request_method", "?")
@@ -364,6 +387,7 @@ def print_text_report(
 ):
     print("=" * 80)
     print("                        SCAN INTEGRITY REPORT")
+    print(f"                              {VERSION}")
     print("=" * 80)
 
     started = format_timestamp(scan.get("started", "—"))
@@ -377,11 +401,7 @@ def print_text_report(
             f"({scan_profile.get('id', '')})"
         )
 
-    target_name = (
-        target.get("site", {}).get("name")
-        or target.get("name")
-        or "—"
-    )
+    target_name = target_display_name(target, scan) or "—"
     print(f"\nTarget name:    {target_name}")
     print(
         f"Target:         "
@@ -461,21 +481,8 @@ def print_text_report(
 
     if ea["non_2xx"]:
         print(f"\nEndpoints with non-2xx status codes:")
-        print(
-            f"  {'Method':<8} {'URL':<40} {'Status':<8} "
-            f"{'Auth':<16} {'Params':<8} {'Req Size':<10} "
-            f"{'Resp Size':<10}"
-        )
-        print(
-            f"  {'─' * 8} {'─' * 40} {'─' * 8} {'─' * 16} "
-            f"{'─' * 8} {'─' * 10} {'─' * 10}"
-        )
-        for e in ea["non_2xx"][:10]:
-            method = e.get("request_method", "?")
-            url = e.get("url", "?")
-            if len(url) > 40:
-                url = url[:37] + "..."
-            status_code = e.get("status_code", "?")
+        non_2xx_rows = []
+        for e in ea["non_2xx"]:
             auth = e.get("authenticated")
             auth_str = (
                 "authenticated"
@@ -484,16 +491,28 @@ def print_text_report(
                 if auth is False
                 else "unknown"
             )
-            params = e.get("request_parameters_count") or 0
-            req_size = format_size(e.get("raw_request_size"))
-            resp_size = format_size(e.get("raw_response_size"))
-            print(
-                f"  {method:<8} {url:<40} {status_code:<8} "
-                f"{auth_str:<16} {params:<8} {req_size:<10} "
-                f"{resp_size:<10}"
-            )
-        if len(ea["non_2xx"]) > 10:
-            print(f"  ... ({len(ea['non_2xx']) - 10} more)")
+            non_2xx_rows.append([
+                e.get("request_method", "?"),
+                e.get("url", "?"),
+                e.get("status_code", "?"),
+                auth_str,
+                e.get("request_parameters_count") or 0,
+                format_size(e.get("raw_request_size")),
+                format_size(e.get("raw_response_size")),
+            ])
+        print_table(
+            2,
+            [
+                "Method",
+                "URL",
+                "Status",
+                "Auth",
+                "Params",
+                "Req Size",
+                "Resp Size",
+            ],
+            non_2xx_rows,
+        )
 
     # Authentication coverage
     print_header("AUTHENTICATION COVERAGE")
@@ -514,29 +533,28 @@ def print_text_report(
         print(
             f"\nUnauthenticated endpoints:\n"
         )
-        print(
-            f"  {'Method':<8} {'URL':<50} {'Status':<8} "
-            f"{'Params':<8} {'Req Size':<10} {'Resp Size':<10}"
+        unauth_rows = []
+        for e in ea["unauthenticated"]:
+            unauth_rows.append([
+                e.get("request_method", "?"),
+                e.get("url", "?"),
+                e.get("status_code", "?"),
+                e.get("request_parameters_count") or 0,
+                format_size(e.get("raw_request_size")),
+                format_size(e.get("raw_response_size")),
+            ])
+        print_table(
+            2,
+            [
+                "Method",
+                "URL",
+                "Status",
+                "Params",
+                "Req Size",
+                "Resp Size",
+            ],
+            unauth_rows,
         )
-        print(
-            f"  {'─' * 8} {'─' * 50} {'─' * 8} {'─' * 8} "
-            f"{'─' * 10} {'─' * 10}"
-        )
-        for e in ea["unauthenticated"][:20]:
-            method = e.get("request_method", "?")
-            url = e.get("url", "?")
-            if len(url) > 50:
-                url = url[:47] + "..."
-            status_code = e.get("status_code", "?")
-            params = e.get("request_parameters_count") or 0
-            req_size = format_size(e.get("raw_request_size"))
-            resp_size = format_size(e.get("raw_response_size"))
-            print(
-                f"  {method:<8} {url:<50} {status_code:<8} "
-                f"{params:<8} {req_size:<10} {resp_size:<10}"
-            )
-        if unauth_count > 20:
-            print(f"  ... ({unauth_count - 20} more)")
 
     # Rejected endpoints
     print_header("REJECTED ENDPOINTS")
@@ -568,23 +586,15 @@ def print_text_report(
         ):
             print(f"  {count:>4}  {reason}")
 
-        print(
-            f"\n  {'Method':<8} {'URL':<50} {'Reason':<30}"
-        )
-        print(f"  {'─' * 8} {'─' * 50} {'─' * 30}")
-        for e in ea["rejected"][:20]:
-            method = e.get("request_method", "?")
-            url = e.get("url", "?")
-            if len(url) > 50:
-                url = url[:47] + "..."
-            reason = e.get("reason") or "—"
-            if len(reason) > 30:
-                reason = reason[:27] + "..."
-            print(
-                f"  {method:<8} {url:<50} {reason:<30}"
-            )
-        if rejected_count > 20:
-            print(f"  ... ({rejected_count - 20} more)")
+        rejected_rows = []
+        for e in ea["rejected"]:
+            rejected_rows.append([
+                e.get("request_method", "?"),
+                e.get("url", "?"),
+                e.get("reason") or "—",
+            ])
+        print()
+        print_table(2, ["Method", "URL", "Reason"], rejected_rows)
 
     # Findings
     print_header("FINDINGS SUMMARY")
@@ -597,7 +607,7 @@ def print_text_report(
     print(f"  Medium:         {len(fa['medium'])}")
     print(f"  Low:            {len(fa['low'])}")
 
-    for sev in ("critical", "high"):
+    for sev in ("critical", "high", "medium", "low"):
         if fa[sev]:
             print(f"\n{sev.capitalize()} severity:")
             for f in fa[sev]:
@@ -625,6 +635,23 @@ def auth_label(authenticated):
     if authenticated is False:
         return "unauthenticated"
     return "unknown"
+
+
+def target_display_name(target, scan=None):
+    scan = scan or {}
+    scan_target = scan.get("target") or {}
+    for name in (
+        target.get("site", {}).get("name"),
+        scan_target.get("site", {}).get("name"),
+        (scan.get("target_options") or {}).get("site", {}).get(
+            "name"
+        ),
+        target.get("name"),
+        scan_target.get("name"),
+    ):
+        if name:
+            return name
+    return None
 
 
 def serialize_endpoint(endpoint):
@@ -692,14 +719,12 @@ def print_json_report(
     )
 
     report = {
-        "tenant": TENANT,
+        "script_version": VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "target_name": target_display_name(target, scan),
         "target": {
             "id": target.get("id"),
-            "name": (
-                target.get("site", {}).get("name")
-                or target.get("name")
-            ),
+            "name": target_display_name(target, scan),
             "url": target.get("site", {}).get("url"),
         },
         "scan": {
@@ -756,7 +781,7 @@ def print_json_report(
             ),
         },
         "findings": {
-            "scope": "open",
+            "scope": "scan",
             "total": sum(len(v) for v in fa.values()),
             "critical": len(fa["critical"]),
             "high": len(fa["high"]),
@@ -786,6 +811,11 @@ def print_json_report(
 def main():
     parser = argparse.ArgumentParser(
         description="Scan Integrity Report for Snyk API & Web",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
     )
     parser.add_argument(
         "--scan-id",
