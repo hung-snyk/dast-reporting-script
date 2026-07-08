@@ -11,6 +11,7 @@ Usage:
     python3 scan-integrity-report.py --target-id <target_id>          (latest scan)
     python3 scan-integrity-report.py --scan-id <scan_id> --format json
     python3 scan-integrity-report.py --scan-id <scan_id> --show-requests
+    python3 scan-integrity-report.py --scan-id <scan_id> --show-requests --all-requests
     python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>
 """
 
@@ -295,6 +296,25 @@ def analyze_findings(findings):
 
 
 # ── Output ─────────────────────────────────────────────────────────────────────
+
+
+def should_prompt_between_batches(all_requests):
+    if all_requests:
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def prompt_for_next_batch(shown, total, page_size):
+    remaining = total - shown
+    try:
+        answer = input(
+            f"Shown {shown}/{total}. "
+            f"Show next {min(page_size, remaining)}? [y/n] "
+        )
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer.lower() in ("y", "yes", "")
 
 
 def print_header(title):
@@ -843,6 +863,14 @@ def main():
         help="Include parsed request details for each endpoint",
     )
     parser.add_argument(
+        "--all-requests",
+        action="store_true",
+        help=(
+            "With --show-requests in text mode, show all endpoint "
+            "details without prompting between batches"
+        ),
+    )
+    parser.add_argument(
         "--endpoint-id",
         default=None,
         help="Show detail for a single endpoint",
@@ -942,11 +970,20 @@ def main():
                 print("\nNo accepted endpoints to show.")
             else:
                 print_header("ENDPOINT DETAILS")
-                print(
-                    f"{total} accepted endpoints. "
-                    f"Showing 10 at a time.\n"
-                )
                 page_size = 10
+                prompt_between_batches = should_prompt_between_batches(
+                    args.all_requests
+                )
+                if prompt_between_batches:
+                    print(
+                        f"{total} accepted endpoints. "
+                        f"Showing {page_size} at a time.\n"
+                    )
+                else:
+                    print(
+                        f"{total} accepted endpoints. "
+                        f"Showing all request details.\n"
+                    )
                 for i in range(0, total, page_size):
                     batch = accepted[i : i + page_size]
                     for ep in batch:
@@ -963,22 +1000,9 @@ def main():
                             print_endpoint_detail(detail)
 
                     shown = min(i + page_size, total)
-                    remaining = total - shown
-                    if remaining > 0:
-                        try:
-                            answer = input(
-                                f"Shown {shown}/{total}. "
-                                f"Show next "
-                                f"{min(page_size, remaining)}"
-                                f"? [y/n] "
-                            )
-                        except (EOFError, KeyboardInterrupt):
-                            print()
-                            break
-                        if answer.lower() not in (
-                            "y",
-                            "yes",
-                            "",
+                    if shown < total and prompt_between_batches:
+                        if not prompt_for_next_batch(
+                            shown, total, page_size
                         ):
                             break
 

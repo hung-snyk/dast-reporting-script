@@ -26,7 +26,8 @@ python3 scan-integrity-report.py --scan-id <scan_id>
 python3 scan-integrity-report.py --target-id <target_id>
 
 python3 scan-integrity-report.py --scan-id <scan_id> --format json          # CI / automation
-python3 scan-integrity-report.py --scan-id <scan_id> --show-requests        # parsed requests, 10 at a time
+python3 scan-integrity-report.py --scan-id <scan_id> --show-requests        # parsed requests, 10 at a time (interactive)
+python3 scan-integrity-report.py --scan-id <scan_id> --show-requests --all-requests  # all request details, no prompts
 python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>   # single endpoint only
 ```
 
@@ -36,6 +37,7 @@ python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>   # s
 | `--target-id` | Target to report on (latest scan) |
 | `--format` | `text` (default) or `json` |
 | `--show-requests` | Include parsed HTTP requests per endpoint |
+| `--all-requests` | With `--show-requests` in text mode, show all endpoint details without prompting between batches (auto-enabled when stdout/stdin are not a TTY) |
 | `--endpoint-id` | Skip full report; show one endpoint |
 
 ## What the report includes
@@ -46,7 +48,7 @@ python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>   # s
 - **Rejected endpoints** — reasons (requires *Include deduplicated endpoints* on the target)
 - **Findings** — counts by severity; all severities listed with state (this scan only)
 
-With `--show-requests`, sensitive headers (`Authorization`, auth cookies) are masked as `**********`.
+With `--show-requests`, sensitive headers (`Authorization`, auth cookies) are masked as `**********`. In interactive text mode, endpoint details are shown 10 at a time with a prompt to continue; use `--all-requests` for a full dump, or pipe output to auto-continue without prompts.
 
 ## Example
 
