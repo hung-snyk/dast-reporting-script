@@ -323,27 +323,13 @@ def print_header(title):
     print(f"{'=' * 80}\n")
 
 
-def print_table(indent, headers, rows):
-    str_rows = [[str(cell) for cell in row] for row in rows]
-    widths = [
-        max(
-            len(headers[i]),
-            *(len(row[i]) for row in str_rows),
-        )
-        for i in range(len(headers))
-    ]
-    prefix = " " * indent
-    sep = prefix + "  ".join("─" * w for w in widths)
-
-    def fmt_row(cells):
-        return prefix + "  ".join(
-            f"{cell:<{widths[i]}}" for i, cell in enumerate(cells)
-        )
-
-    print(fmt_row(headers))
-    print(sep)
-    for row in str_rows:
-        print(fmt_row(row))
+def truncate_text(text, max_len):
+    text = str(text)
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
 
 
 def print_endpoint_detail(detail):
@@ -501,8 +487,19 @@ def print_text_report(
 
     if ea["non_2xx"]:
         print(f"\nEndpoints with non-2xx status codes:")
-        non_2xx_rows = []
-        for e in ea["non_2xx"]:
+        print(
+            f"  {'Method':<8} {'URL':<40} {'Status':<8} "
+            f"{'Auth':<16} {'Params':<8} {'Req Size':<10} "
+            f"{'Resp Size':<10}"
+        )
+        print(
+            f"  {'─' * 8} {'─' * 40} {'─' * 8} {'─' * 16} "
+            f"{'─' * 8} {'─' * 10} {'─' * 10}"
+        )
+        for e in ea["non_2xx"][:10]:
+            method = e.get("request_method", "?")
+            url = truncate_text(e.get("url", "?"), 40)
+            status_code = e.get("status_code", "?")
             auth = e.get("authenticated")
             auth_str = (
                 "authenticated"
@@ -511,28 +508,16 @@ def print_text_report(
                 if auth is False
                 else "unknown"
             )
-            non_2xx_rows.append([
-                e.get("request_method", "?"),
-                e.get("url", "?"),
-                e.get("status_code", "?"),
-                auth_str,
-                e.get("request_parameters_count") or 0,
-                format_size(e.get("raw_request_size")),
-                format_size(e.get("raw_response_size")),
-            ])
-        print_table(
-            2,
-            [
-                "Method",
-                "URL",
-                "Status",
-                "Auth",
-                "Params",
-                "Req Size",
-                "Resp Size",
-            ],
-            non_2xx_rows,
-        )
+            params = e.get("request_parameters_count") or 0
+            req_size = format_size(e.get("raw_request_size"))
+            resp_size = format_size(e.get("raw_response_size"))
+            print(
+                f"  {method:<8} {url:<40} {status_code:<8} "
+                f"{auth_str:<16} {params:<8} {req_size:<10} "
+                f"{resp_size:<10}"
+            )
+        if len(ea["non_2xx"]) > 10:
+            print(f"  ... ({len(ea['non_2xx']) - 10} more)")
 
     # Authentication coverage
     print_header("AUTHENTICATION COVERAGE")
@@ -553,28 +538,27 @@ def print_text_report(
         print(
             f"\nUnauthenticated endpoints:\n"
         )
-        unauth_rows = []
-        for e in ea["unauthenticated"]:
-            unauth_rows.append([
-                e.get("request_method", "?"),
-                e.get("url", "?"),
-                e.get("status_code", "?"),
-                e.get("request_parameters_count") or 0,
-                format_size(e.get("raw_request_size")),
-                format_size(e.get("raw_response_size")),
-            ])
-        print_table(
-            2,
-            [
-                "Method",
-                "URL",
-                "Status",
-                "Params",
-                "Req Size",
-                "Resp Size",
-            ],
-            unauth_rows,
+        print(
+            f"  {'Method':<8} {'URL':<50} {'Status':<8} "
+            f"{'Params':<8} {'Req Size':<10} {'Resp Size':<10}"
         )
+        print(
+            f"  {'─' * 8} {'─' * 50} {'─' * 8} {'─' * 8} "
+            f"{'─' * 10} {'─' * 10}"
+        )
+        for e in ea["unauthenticated"][:20]:
+            method = e.get("request_method", "?")
+            url = truncate_text(e.get("url", "?"), 50)
+            status_code = e.get("status_code", "?")
+            params = e.get("request_parameters_count") or 0
+            req_size = format_size(e.get("raw_request_size"))
+            resp_size = format_size(e.get("raw_response_size"))
+            print(
+                f"  {method:<8} {url:<50} {status_code:<8} "
+                f"{params:<8} {req_size:<10} {resp_size:<10}"
+            )
+        if unauth_count > 20:
+            print(f"  ... ({unauth_count - 20} more)")
 
     # Rejected endpoints
     print_header("REJECTED ENDPOINTS")
@@ -606,15 +590,19 @@ def print_text_report(
         ):
             print(f"  {count:>4}  {reason}")
 
-        rejected_rows = []
-        for e in ea["rejected"]:
-            rejected_rows.append([
-                e.get("request_method", "?"),
-                e.get("url", "?"),
-                e.get("reason") or "—",
-            ])
-        print()
-        print_table(2, ["Method", "URL", "Reason"], rejected_rows)
+        print(
+            f"\n  {'Method':<8} {'URL':<50} {'Reason':<30}"
+        )
+        print(f"  {'─' * 8} {'─' * 50} {'─' * 30}")
+        for e in ea["rejected"][:20]:
+            method = e.get("request_method", "?")
+            url = truncate_text(e.get("url", "?"), 50)
+            reason = truncate_text(e.get("reason") or "—", 30)
+            print(
+                f"  {method:<8} {url:<50} {reason:<30}"
+            )
+        if rejected_count > 20:
+            print(f"  ... ({rejected_count - 20} more)")
 
     # Findings
     print_header("FINDINGS SUMMARY")

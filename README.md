@@ -44,7 +44,7 @@ python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>   # s
 
 - **Scan metadata** — target name, URL, status, profile, runtime, who triggered it and how
 - **Coverage** — accepted vs rejected endpoints, auth/unauth breakdown, status codes, sizes
-- **Anomalies** — non-2xx and unauthenticated endpoints (full URLs, no truncation)
+- **Anomalies** — non-2xx and unauthenticated endpoints (truncated URLs in text output; full URLs in JSON)
 - **Rejected endpoints** — reasons (requires *Include deduplicated endpoints* on the target)
 - **Findings** — counts by severity; all severities listed with state (this scan only)
 
