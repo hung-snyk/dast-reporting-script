@@ -57,7 +57,7 @@ Text output (`--format text`):
 ```
 ================================================================================
                         SCAN INTEGRITY REPORT
-                              v3.1
+                              v3.2
 ================================================================================
 
 Target name:    Payments API (Production)
@@ -114,7 +114,7 @@ JSON output (`--format json`) includes `script_version`, `target_name`, structur
 
 ```json
 {
-  "script_version": "v3.1",
+  "script_version": "v3.2",
   "target_name": "Payments API (Production)",
   "target": { "id": "2eJXbYcRLhsQ", "url": "https://api.example.com" },
   "scan": { "id": "M8jvAPmBJUJb", "status": "completed", "scan_profile": { "id": "sp-default", "name": "Full Scan" } },

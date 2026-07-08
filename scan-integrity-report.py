@@ -29,7 +29,7 @@ from urllib3.util.retry import Retry
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-VERSION = "v3.1"
+VERSION = "v3.2"
 API_BASE_URL = "https://api.us.probely.com"
 REQUEST_TIMEOUT = 30
 
