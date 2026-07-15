@@ -19,11 +19,13 @@ Optional: set `API_BASE_URL` at the top of `scan-integrity-report.py` (default: 
 
 ## Usage
 
-Provide `--scan-id` for a specific scan, or `--target-id` for the latest scan on a target.
+Provide `--scan-id` for a specific scan, `--target-id` or `--target-name` for the latest scan on a target, or `--list-targets` to look up IDs.
 
 ```bash
 python3 scan-integrity-report.py --scan-id <scan_id>
 python3 scan-integrity-report.py --target-id <target_id>
+python3 scan-integrity-report.py --target-name "<target_name>"
+python3 scan-integrity-report.py --list-targets
 
 python3 scan-integrity-report.py --scan-id <scan_id> --format json          # CI / automation
 python3 scan-integrity-report.py --scan-id <scan_id> --show-requests        # parsed requests, 10 at a time (interactive)
@@ -35,10 +37,19 @@ python3 scan-integrity-report.py --scan-id <scan_id> --endpoint-id <ep_id>   # s
 |--------|-------------|
 | `--scan-id` | Scan to report on |
 | `--target-id` | Target to report on (latest scan) |
-| `--format` | `text` (default) or `json` |
+| `--target-name` | Target display name, exact match (latest scan; alternative to `--target-id`) |
+| `--list-targets` | List target names and IDs (first page only; see `--list-all`) |
+| `--list-all` | With `--list-targets`, fetch all pages (warns for 500+ targets) |
+| `--list-page` | With `--list-targets`, page number (default: 1) |
+| `--list-length` | With `--list-targets`, results per page in paginated mode (default: 50; not used with `--list-all`) |
+| `--target-search` | With `--list-targets`, filter by name, URL, or label (API search) |
+| `--api-key` | API key (optional; defaults to `SAW_API_KEY` env var — prefer env var in shared shells) |
+| `--format` | `text` (default) or `json` (including with `--list-targets`) |
 | `--show-requests` | Include parsed HTTP requests per endpoint |
 | `--all-requests` | With `--show-requests` in text mode, show all endpoint details without prompting between batches (auto-enabled when stdout/stdin are not a TTY) |
 | `--endpoint-id` | Skip full report; show one endpoint |
+
+See [RELEASE-v3.3-customer-notes.md](RELEASE-v3.3-customer-notes.md) for risks, tradeoffs, and upgrade guidance.
 
 ## What the report includes
 
@@ -57,7 +68,7 @@ Text output (`--format text`):
 ```
 ================================================================================
                         SCAN INTEGRITY REPORT
-                              v3.2
+                              v3.3
 ================================================================================
 
 Target name:    Payments API (Production)
@@ -114,7 +125,7 @@ JSON output (`--format json`) includes `script_version`, `target_name`, structur
 
 ```json
 {
-  "script_version": "v3.2",
+  "script_version": "v3.3",
   "target_name": "Payments API (Production)",
   "target": { "id": "2eJXbYcRLhsQ", "url": "https://api.example.com" },
   "scan": { "id": "M8jvAPmBJUJb", "status": "completed", "scan_profile": { "id": "sp-default", "name": "Full Scan" } },

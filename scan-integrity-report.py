@@ -9,6 +9,8 @@ Usage:
     export SAW_API_KEY="eyJhbG..."
     python3 scan-integrity-report.py --scan-id <scan_id>
     python3 scan-integrity-report.py --target-id <target_id>          (latest scan)
+    python3 scan-integrity-report.py --target-name "<target_name>"    (latest scan)
+    python3 scan-integrity-report.py --list-targets                   (list target names and IDs)
     python3 scan-integrity-report.py --scan-id <scan_id> --format json
     python3 scan-integrity-report.py --scan-id <scan_id> --show-requests
     python3 scan-integrity-report.py --scan-id <scan_id> --show-requests --all-requests
@@ -29,9 +31,11 @@ from urllib3.util.retry import Retry
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-VERSION = "v3.2"
+VERSION = "v3.3"
 API_BASE_URL = "https://api.us.probely.com"
 REQUEST_TIMEOUT = 30
+DEFAULT_LIST_LENGTH = 50
+LIST_ALL_WARN_THRESHOLD = 500
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -103,19 +107,37 @@ class APIClient:
         resp.raise_for_status()
         return resp.json()
 
-    def get_all(self, path, params=None):
+    def get_all(self, path, params=None, max_pages=None, progress_label=None):
         params = dict(params or {})
         params.setdefault("length", 100)
         page = 1
         results = []
+        page_total = 1
         while True:
             params["page"] = page
             data = self.get(path, params)
+            page_total = data.get("page_total", 1)
+            if progress_label and page_total > 1:
+                print(
+                    f"  Fetching {progress_label}: "
+                    f"page {page}/{page_total}...",
+                    file=sys.stderr,
+                )
             results.extend(data.get("results", []))
-            if page >= data.get("page_total", 1):
+            if page >= page_total:
+                break
+            if max_pages is not None and page >= max_pages:
                 break
             page += 1
         return results
+
+    def get_targets_page(
+        self, page=1, length=DEFAULT_LIST_LENGTH, search=None
+    ):
+        params = {"page": page, "length": length}
+        if search:
+            params["search"] = search
+        return self.get("/targets/", params=params)
 
 
 # ── Data Fetching ──────────────────────────────────────────────────────────────
@@ -149,6 +171,17 @@ def fetch_findings(client, target_id, scan_id):
     return client.get_all(
         f"/targets/{target_id}/findings/",
         params={"scan": scan_id},
+    )
+
+
+def fetch_targets(client, search=None):
+    params = {}
+    if search:
+        params["search"] = search
+    return client.get_all(
+        "/targets/",
+        params=params,
+        progress_label="targets" if search else "all targets",
     )
 
 
@@ -420,12 +453,7 @@ def print_text_report(
     print(f"Started:        {started}")
     print(f"Completed:      {completed}")
     print(f"Runtime:        {runtime_str}")
-    created_by = (
-        scan.get("created_by", {}).get("email", "—")
-        if scan.get("created_by")
-        else "—"
-    )
-    print(f"Created by:     {created_by}")
+    print(f"Created by:     {scan_created_by_display(scan) or '—'}")
     print(f"Event source:   {scan.get('event_source', '—')}")
 
     # Coverage summary
@@ -645,6 +673,179 @@ def auth_label(authenticated):
     return "unknown"
 
 
+def resolve_api_key(cli_api_key):
+    api_key = cli_api_key or os.environ.get("SAW_API_KEY")
+    if not api_key:
+        print(
+            "Error: no API key provided.\n"
+            "Set SAW_API_KEY or pass --api-key:\n\n"
+            '  export SAW_API_KEY="eyJhbG..."\n'
+            "  python3 scan-integrity-report.py --api-key eyJhbG... ...\n\n"
+            "Prefer the environment variable in shared shells and CI "
+            "to avoid exposing the key in shell history or process lists.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return api_key
+
+
+def find_targets_by_name(targets, target_name):
+    needle = target_name.strip()
+    matches = [
+        target
+        for target in targets
+        if target_display_name(target) == needle
+    ]
+    return matches
+
+
+def resolve_target_id_by_name(client, target_name):
+    needle = target_name.strip()
+    matches = find_targets_by_name(
+        fetch_targets(client, search=needle),
+        needle,
+    )
+    if not matches:
+        print(
+            f"Error: no target found with name {needle!r}.\n"
+            "Try --list-targets --target-search to narrow results, "
+            "or use --target-id.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if len(matches) > 1:
+        print(
+            f"Error: {len(matches)} targets match name "
+            f"{needle!r}. Use --target-id instead:\n",
+            file=sys.stderr,
+        )
+        for target in matches:
+            print(
+                f"  {target.get('id', '?')}  "
+                f"{target_display_name(target) or '—'}  "
+                f"{target.get('site', {}).get('url', '—')}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+    return matches[0]["id"]
+
+
+def serialize_target_summary(target):
+    return {
+        "id": target.get("id"),
+        "name": target_display_name(target),
+        "url": target.get("site", {}).get("url"),
+    }
+
+
+def print_target_list_json(targets, list_meta=None):
+    payload = {
+        "targets": [serialize_target_summary(t) for t in targets],
+    }
+    if list_meta:
+        payload.update(list_meta)
+    print(json.dumps(payload, indent=2))
+
+
+def print_target_list(targets, list_meta=None):
+    rows = []
+    for target in sorted(
+        targets,
+        key=lambda item: (
+            (target_display_name(item) or "").lower(),
+            item.get("id", ""),
+        ),
+    ):
+        rows.append([
+            target.get("id", "?"),
+            target_display_name(target) or "—",
+            target.get("site", {}).get("url", "—"),
+        ])
+    print(f"{'Target ID':<16} {'Name':<40} URL")
+    print(f"{'─' * 16} {'─' * 40} {'─' * 40}")
+    for target_id, name, url in rows:
+        print(
+            f"{target_id:<16} "
+            f"{truncate_text(name, 40):<40} "
+            f"{truncate_text(url, 80)}"
+        )
+    print(f"\nTargets shown: {len(rows)}")
+    if not list_meta:
+        return
+    if list_meta.get("listed_all"):
+        if list_meta.get("count") is not None:
+            print(f"Total matched: {list_meta['count']}")
+        return
+    count = list_meta.get("count")
+    page = list_meta.get("page", 1)
+    page_total = list_meta.get("page_total", 1)
+    if count is not None:
+        print(f"Account total: {count}")
+    if page_total > 1:
+        print(f"Page: {page} of {page_total}")
+
+
+def warn_before_list_all(client, search=None):
+    preview = client.get_targets_page(
+        page=1, length=1, search=search
+    )
+    total = preview.get("count", 0)
+    page_total = preview.get("page_total", 1)
+    if total > LIST_ALL_WARN_THRESHOLD:
+        print(
+            f"Warning: fetching all {total} targets requires "
+            f"up to {page_total} API requests. Prefer "
+            f"--target-search or paginate with --list-page.",
+            file=sys.stderr,
+        )
+    return total, page_total
+
+
+def run_list_targets(client, args):
+    search = args.target_search
+    if args.list_all:
+        warn_before_list_all(client, search=search)
+        targets = fetch_targets(client, search=search)
+        list_meta = {
+            "listed_all": True,
+            "count": len(targets),
+            "search": search,
+        }
+        if args.output_format == "json":
+            print_target_list_json(targets, list_meta=list_meta)
+        else:
+            print_target_list(targets, list_meta=list_meta)
+        return
+
+    data = client.get_targets_page(
+        page=args.list_page,
+        length=args.list_length,
+        search=search,
+    )
+    targets = data.get("results", [])
+    list_meta = {
+        "count": data.get("count"),
+        "page": data.get("page", args.list_page),
+        "page_total": data.get("page_total", 1),
+        "length": args.list_length,
+        "search": search,
+    }
+    if args.output_format == "json":
+        print_target_list_json(targets, list_meta=list_meta)
+    else:
+        print_target_list(
+            targets,
+            list_meta=list_meta,
+        )
+        page_total = data.get("page_total", 1)
+        if page_total > 1:
+            print(
+                "\nTip: use --list-page, --target-search, or --list-all "
+                "to see more targets.",
+                file=sys.stderr,
+            )
+
+
 def target_display_name(target, scan=None):
     scan = scan or {}
     scan_target = scan.get("target") or {}
@@ -703,6 +904,17 @@ def rejected_reason_counts(rejected):
     )
 
 
+def scan_created_by_display(scan):
+    user = scan.get("created_by") or {}
+    email = (user.get("email") or "").strip()
+    if email:
+        return email
+    name = (user.get("name") or "").strip()
+    if name:
+        return name
+    return None
+
+
 def scan_profile_value(scan):
     scan_profile = scan.get("scan_profile")
     if isinstance(scan_profile, dict):
@@ -742,11 +954,7 @@ def print_json_report(
             "started": scan.get("started"),
             "completed": scan.get("completed"),
             "runtime": scan.get("runtime"),
-            "created_by": (
-                scan.get("created_by", {}).get("email")
-                if scan.get("created_by")
-                else None
-            ),
+            "created_by": scan_created_by_display(scan),
             "event_source": scan.get("event_source"),
         },
         "coverage": {
@@ -839,6 +1047,64 @@ def main():
         ),
     )
     parser.add_argument(
+        "--target-name",
+        default=None,
+        help=(
+            "Target name (exact match) for the latest scan; "
+            "alternative to --target-id"
+        ),
+    )
+    parser.add_argument(
+        "--list-targets",
+        action="store_true",
+        help=(
+            "List target names and IDs (first page only; use "
+            "--list-all to fetch every target)"
+        ),
+    )
+    parser.add_argument(
+        "--list-all",
+        action="store_true",
+        help=(
+            "With --list-targets, fetch all pages (may be slow "
+            "for large accounts)"
+        ),
+    )
+    parser.add_argument(
+        "--list-page",
+        type=int,
+        default=1,
+        help=(
+            "With --list-targets, page number to fetch "
+            f"(default: 1)"
+        ),
+    )
+    parser.add_argument(
+        "--list-length",
+        type=int,
+        default=DEFAULT_LIST_LENGTH,
+        help=(
+            "With --list-targets, results per page in paginated mode "
+            f"(default: {DEFAULT_LIST_LENGTH}; not used with --list-all)"
+        ),
+    )
+    parser.add_argument(
+        "--target-search",
+        default=None,
+        help=(
+            "Filter targets by name, URL, or label (API search; "
+            "use with --list-targets)"
+        ),
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help=(
+            "Snyk API & Web API key (optional; defaults to "
+            "SAW_API_KEY environment variable)"
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=["text", "json"],
         default="text",
@@ -865,25 +1131,58 @@ def main():
     )
     args = parser.parse_args()
 
-    api_key = os.environ.get("SAW_API_KEY")
-    if not api_key:
+    if args.target_id and args.target_name:
         print(
-            "Error: SAW_API_KEY environment variable not set.\n"
-            "Generate an API key at https://plus.probely.app/ "
-            "and export it:\n\n"
-            '  export SAW_API_KEY="eyJhbG..."\n',
+            "Error: use either --target-id or --target-name, not both.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    if not args.scan_id and not args.target_id:
+    list_options = (
+        args.list_all,
+        args.list_page != 1,
+        args.list_length != DEFAULT_LIST_LENGTH,
+        args.target_search,
+    )
+    if any(list_options) and not args.list_targets:
         print(
-            "Error: provide --scan-id or --target-id.\n",
+            "Error: --list-all, --list-page, --list-length, and "
+            "--target-search require --list-targets.",
             file=sys.stderr,
         )
         sys.exit(1)
 
+    if args.list_targets and (
+        args.scan_id or args.target_id or args.target_name or args.endpoint_id
+    ):
+        print(
+            "Error: --list-targets cannot be combined with scan or "
+            "target options.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args.list_page < 1:
+        print("Error: --list-page must be >= 1.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.list_length < 1:
+        print("Error: --list-length must be >= 1.", file=sys.stderr)
+        sys.exit(1)
+
+    api_key = resolve_api_key(args.api_key)
     client = APIClient(api_key)
+
+    if args.list_targets:
+        run_list_targets(client, args)
+        return
+
+    if not args.scan_id and not args.target_id and not args.target_name:
+        print(
+            "Error: provide --scan-id, --target-id, or --target-name.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.scan_id:
         scan = fetch_scan_by_id(client, args.scan_id)
@@ -898,7 +1197,12 @@ def main():
             )
             sys.exit(1)
     else:
-        target_id = args.target_id
+        if args.target_name:
+            target_id = resolve_target_id_by_name(
+                client, args.target_name
+            )
+        else:
+            target_id = args.target_id
         scan = fetch_latest_scan(client, target_id)
 
     scan_id = scan["id"]
