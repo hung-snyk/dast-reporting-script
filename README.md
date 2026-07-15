@@ -1,3 +1,5 @@
+New repo https://github.com/snyk-ps/dast-reporting-script
+
 # Scan Integrity Report
 
 Python CLI that pulls [Snyk API & Web](https://snyk.io/product/api-web-testing/) scan data and prints a release-readiness report: scan metadata, endpoint coverage, authentication state, response anomalies, and findings by severity.
